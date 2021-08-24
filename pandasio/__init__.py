@@ -52,6 +52,8 @@ def to_sql(df, name, con, keycols=[], references={}, chunksize=4096, method="mul
     """
     
     if basecols is not None:
+        df = df.assign(**{missing: None
+                          for missing in set(basecols) - set(df.columns)})
         extra = df[set(df.columns) - set(basecols)]
         df = df[basecols].copy()
         df["extra"] = extra.apply(
