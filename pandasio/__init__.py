@@ -2,8 +2,28 @@ import pandas as pd
 import sqlalchemy
 import json
 import logging
+import datetime
 
 logger = logging.getLogger(__name__)
+
+def _serialiser(obj):
+    if isinstance(obj, datetime.datetime):
+        return {"__jsonclass__":["datetime.datetime", [obj.strftime("%Y-%m-%d %H:%M:%S")]]}
+    elif isinstance(obj, datetime.date):
+        return {"__jsonclass__": ["datetime.date", [obj.strftime("%Y-%m-%d")]]}
+    raise ValueError("%s is unknown type %s" %(obj, type(obj)))
+
+def _deserialiser(obj):
+    if isinstance(obj,dict) and "__jsonclass__" in obj:
+        if "datetime.datetime" == obj["__jsonclass__"][0]:
+            obj = obj["__jsonclass__"][1][0]
+            obj = datetime.datetime.strptime(obj, '%Y-%m-%d %H:%M:%S')
+            return obj
+        elif "datetime.date" == obj["__jsonclass__"][0]:
+            obj = obj["__jsonclass__"][1][0]
+            obj = datetime.datetime.strptime(obj, '%Y-%m-%d').date()
+            return obj
+    return obj
 
 def get_new_ids(table, col, con, count=1):
     """Requests new unique ID:s from a primary key column so that they can
@@ -61,7 +81,7 @@ def to_sql(df, name, con, keycols=[], references={}, chunksize=4096, method="mul
                 {key:value.item()
                  if hasattr(value, "dtype")
                  else value
-                 for key, value in r.items()}), axis=1)
+                 for key, value in r.items()}, default=_serialiser), axis=1)
         df["extra"] = df["extra"].astype("object")
 
     pandastable = pd.io.sql.SQLTable(name, pd.io.sql.SQLDatabase(con), frame=df, if_exists="append", **kw)
@@ -98,7 +118,7 @@ def to_sql(df, name, con, keycols=[], references={}, chunksize=4096, method="mul
 
 def expand_json_column(df, col):
     if len(df) == 0: return
-    content = df[col].apply(lambda e: json.loads(e) if e else {})
+    content = df[col].apply(lambda e: json.loads(e, object_hook=_deserialiser) if e else {})
     content_keys = list(content[0].keys())
     for key in content_keys:
         df[key] = content.apply(lambda r: r[key])
