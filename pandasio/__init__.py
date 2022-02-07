@@ -45,7 +45,10 @@ def get_new_ids(table, col, con, count=1):
                 [seq.next_value()]
             ).select_from(
                 sqlalchemy.func.generate_series(1, count)
-            )))[0]
+            )))
+        # Warning: The actual column name returned depends on what
+        # pandas version we're on...
+        res = res[res.columns[0]]
         return res
     except sqlalchemy.exc.ProgrammingError as e:
         if not "UndefinedTable" in str(e):

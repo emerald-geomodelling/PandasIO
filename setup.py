@@ -4,7 +4,7 @@ import setuptools
 
 setuptools.setup(
     name='pandasio',
-    version='0.0.3',
+    version='0.0.4',
     description='Pandas to_sql/read_sql_query with primary/foreign key support',
     long_description='''PandasIO reimplements pandas.DataFrame.to_sql and
 pandas.read_sql_query with more control over the SQL side of things
