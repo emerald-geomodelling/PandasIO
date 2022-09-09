@@ -7,7 +7,9 @@ import datetime
 logger = logging.getLogger(__name__)
 
 def _serialiser(obj):
-    if isinstance(obj, datetime.datetime):
+    if pd.isnull(obj):
+        return None
+    elif isinstance(obj, datetime.datetime):
         return {"__jsonclass__":["datetime.datetime", [obj.strftime("%Y-%m-%d %H:%M:%S")]]}
     elif isinstance(obj, datetime.date):
         return {"__jsonclass__": ["datetime.date", [obj.strftime("%Y-%m-%d")]]}
