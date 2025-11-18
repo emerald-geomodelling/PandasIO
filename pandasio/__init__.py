@@ -4,6 +4,7 @@ import json
 import logging
 import datetime
 
+import geomet.wkb
 logger = logging.getLogger(__name__)
 
 def _serialiser(obj):
@@ -75,7 +76,7 @@ def to_sql(df, name, con, keycols=[], references={}, chunksize=4096, method="mul
            will be stored in a JSON object per row in the column
            "extra".
     """
-    
+
     if basecols is not None:
         df = df.assign(**{missing: None
                           for missing in set(basecols) - set(df.columns)})
@@ -91,7 +92,7 @@ def to_sql(df, name, con, keycols=[], references={}, chunksize=4096, method="mul
 
     pandastable = pd.io.sql.SQLTable(name, pd.io.sql.SQLDatabase(con), frame=df, if_exists="append", **kw)
     table = pandastable.table.tometadata(sqlalchemy.MetaData(con))
-    
+
     for key, ref in references.items():
         ref_table, ref_col = ref.split(".")
         logger.debug("For table %s, col %s -> ref table: %s, ref col: %s" % (name, key, ref_table, ref_col))
@@ -99,26 +100,26 @@ def to_sql(df, name, con, keycols=[], references={}, chunksize=4096, method="mul
             ref_table, table.metadata,
             sqlalchemy.Column(ref_col, sqlalchemy.BigInteger(), primary_key=True))
         references[key] = reftable.columns[ref_col]
-        
+
     seqs = []
     for keycol in keycols:
         seq = sqlalchemy.sql.schema.Sequence('%s_%s_seq' % (pandastable.name, keycol))
         seqs.append(seq)
         if keycol not in table.columns:
-            table.append_column(sqlalchemy.Column(keycol, sqlalchemy.BigInteger()))    
+            table.append_column(sqlalchemy.Column(keycol, sqlalchemy.BigInteger()))
         keycoldef = table.columns[keycol]
         table.append_constraint(sqlalchemy.sql.schema.UniqueConstraint(keycol))
         keycoldef.server_default = sqlalchemy.DefaultClause(seq.next_value())
 
     for key, ref in references.items():
-        table.append_constraint(sqlalchemy.ForeignKeyConstraint([key], [ref]))        
+        table.append_constraint(sqlalchemy.ForeignKeyConstraint([key], [ref]))
 
     for seq in seqs:
         seq.create(con)
     # table.create()
 
     table.metadata.create_all(checkfirst=True)
-    
+
     pandastable.insert(chunksize=chunksize, method=method)
 
 def expand_json_column(df, col):
@@ -130,6 +131,24 @@ def expand_json_column(df, col):
     del df[col]
     return content_keys
 
+def read_hook(df):
+    for col in df.columns:
+        if df[col].dtype == "object":
+            first_non_null = df[col].dropna().head(1)
+            if not first_non_null.empty:
+                val = first_non_null.iloc[0]
+                if isinstance(val, str) and val.startswith("{"):
+                    try:
+                        df[col] = df[col].apply(lambda x: json.loads(x) if pd.notnull(x) else x)
+                    except (ValueError, TypeError):
+                        pass
+                elif isinstance(val, bytes):
+                    try:
+                        df[col] = df[col].apply(lambda x: geomet.wkb.loads(x) if pd.notnull(x) else x)
+                    except (ValueError, TypeError):
+                        pass
+    return df
+
 def read_sql_query(
     sql,
     con,
@@ -137,25 +156,31 @@ def read_sql_query(
     coerce_float=True,
     params=None,
     parse_dates=None,
-    chunksize = None):
+    chunksize = None
+):
     """Like pd.read_sql_query, but supports deserializing extra columns
        from a column `extra` containing JSON objects.
     """
     if params is not None:
-        p = []
-        for param in params:
-            if hasattr(param, "dtype"):
-                param = param.item()
-            p.append(param)
-        params = p
+        # Convert single value or list of non-tuple/dict items to a tuple
+        if not isinstance(params, (tuple, dict, list)):
+            params = (params,)
+        elif isinstance(params, list) and params and not isinstance(params[0], (tuple, dict)):
+            params = tuple(params)
+        # Convert numpy types to Python scalars within tuples
+        if isinstance(params, tuple):
+            params = tuple(p.item() if hasattr(p, "dtype") else p for p in params)
     df = pd.read_sql_query(
         sql,
         con,
-        index_col,
-        coerce_float,
-        params,
-        parse_dates,
-        chunksize)
+        index_col=index_col,
+        coerce_float=coerce_float,
+        params=params,
+        parse_dates=parse_dates,
+        chunksize=chunksize
+    )
+    if hasattr(df, "to_pandas"):
+        df = df.to_pandas()
     if "extra" in df.columns:
         expand_json_column(df, "extra")
     return df
