@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pandasio"
-version = "0.0.4"
+version = "0.0.5"
 description = "Pandas to_sql/read_sql_query with primary/foreign key support"
 readme = "README.md"
 license = "MIT"
