@@ -45,7 +45,7 @@ def get_new_ids(table, col, con, count=1):
     try:
         res = pd.DataFrame(con.execute(
             sqlalchemy.select(
-                [seq.next_value()]
+                seq.next_value()  # SQLAlchemy 2.x: no list wrapper
             ).select_from(
                 sqlalchemy.func.generate_series(1, count)
             )))
@@ -80,8 +80,10 @@ def to_sql(df, name, con, keycols=[], references={}, chunksize=4096, method="mul
     if basecols is not None:
         df = df.assign(**{missing: None
                           for missing in set(basecols) - set(df.columns)})
-        extra = df[set(df.columns) - set(basecols)]
-        df = df[basecols].copy()
+        # pandas 2.x: sets not allowed as indexers, convert to list
+        extra_cols = list(set(df.columns) - set(basecols))
+        extra = df[extra_cols]
+        df = df[list(basecols)].copy()
         df["extra"] = extra.apply(
             lambda r: json.dumps(
                 {key:value.item()
@@ -91,7 +93,9 @@ def to_sql(df, name, con, keycols=[], references={}, chunksize=4096, method="mul
         df["extra"] = df["extra"].astype("object")
 
     pandastable = pd.io.sql.SQLTable(name, pd.io.sql.SQLDatabase(con), frame=df, if_exists="append", **kw)
-    table = pandastable.table.tometadata(sqlalchemy.MetaData(con))
+    # SQLAlchemy 2.x: MetaData() no longer accepts bind argument
+    metadata = sqlalchemy.MetaData()
+    table = pandastable.table.to_metadata(metadata)
 
     for key, ref in references.items():
         ref_table, ref_col = ref.split(".")
@@ -114,11 +118,12 @@ def to_sql(df, name, con, keycols=[], references={}, chunksize=4096, method="mul
     for key, ref in references.items():
         table.append_constraint(sqlalchemy.ForeignKeyConstraint([key], [ref]))
 
+    # SQLAlchemy 2.x: pass connection explicitly to create methods
     for seq in seqs:
         seq.create(con)
     # table.create()
 
-    table.metadata.create_all(checkfirst=True)
+    table.metadata.create_all(con, checkfirst=True)
 
     pandastable.insert(chunksize=chunksize, method=method)
 
